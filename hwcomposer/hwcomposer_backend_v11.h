@@ -64,11 +64,10 @@ public:
 private:
     hwc_composer_device_1_t *hwc_device;
     HWComposerNativeWindow *hwc_win;
-    hwc_display_contents_1_t *hwc_list;
-    hwc_display_contents_1_t **hwc_mList;
-    int oldretire;
-    int oldrelease;
-    int oldrelease2;
+    hwc_display_contents_1_t *hwc_primaryDisplay;
+    hwc_display_contents_1_t **hwc_displayList;
+    int lastDisplayFence;
+    hwc_rect_t visible_rect;
 };
 
 #endif /* HWC_PLUGIN_HAVE_HWCOMPOSER1_API */

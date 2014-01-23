@@ -47,7 +47,7 @@
 static pthread_mutex_t vsync_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t vsync_cond = PTHREAD_COND_INITIALIZER;
 
-const char *
+static const char *
 comp_type_str(int32_t type)
 {
     switch (type) {
@@ -60,7 +60,7 @@ comp_type_str(int32_t type)
     return "unknown";
 }
 
-const char *
+static const char *
 blending_type_str(int32_t type)
 {
     switch (type) {

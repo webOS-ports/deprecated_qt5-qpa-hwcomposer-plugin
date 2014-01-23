@@ -2,6 +2,7 @@
 **
 ** Copyright (C) 2013 Jolla Ltd.
 ** Contact: Thomas Perl <thomas.perl@jolla.com>
+** Copyright (c) 2014 Simon Busch <morphis@gravedo.de>
 **
 ** This file is part of the hwcomposer plugin.
 **
@@ -43,17 +44,101 @@
 
 #ifdef HWC_PLUGIN_HAVE_HWCOMPOSER1_API
 
+static const char *
+comp_type_str(int32_t type)
+{
+    switch (type) {
+        case HWC_BACKGROUND: return "BACKGROUND";
+        case HWC_FRAMEBUFFER_TARGET: return "FB TARGET";
+        case HWC_FRAMEBUFFER: return "FB";
+        case HWC_OVERLAY: return "OVERLAY";
+    }
+
+    return "unknown";
+}
+
+static const char *
+blending_type_str(int32_t type)
+{
+    switch (type) {
+        case HWC_BLENDING_NONE: return "NONE";
+        case HWC_BLENDING_PREMULT: return "PREMULT";
+        case HWC_BLENDING_COVERAGE: return "COVERAGE";
+    }
+
+    return "unknown";
+}
+
+static void
+dump_display_contents(hwc_display_contents_1_t *contents)
+{
+    static const char *dump_env = getenv("HWC_DUMP_DISPLAY_CONTENTS");
+    static bool do_dump = (dump_env != NULL && strcmp(dump_env, "1") == 0);
+
+    if (!do_dump) {
+        return;
+    }
+
+    fprintf(stderr, "============ QPA-HWC: dump_display_contents(%p) ============\n",  contents);
+    fprintf(stderr, "retireFenceFd = %d\n", contents->retireFenceFd);
+    fprintf(stderr, "dpy = %p\n", contents->dpy);
+    fprintf(stderr, "sur = %p\n", contents->sur);
+    fprintf(stderr, "flags = %x\n", contents->flags);
+    fprintf(stderr, "numHwLayers = %d\n", contents->numHwLayers);
+    for (int i=0; i<contents->numHwLayers; i++) {
+        hwc_layer_1_t *layer = &(contents->hwLayers[i]);
+        fprintf(stderr, "Layer %d (%p):\n"
+                        "    type=%s, hints=%x, flags=%x, handle=%x, transform=%d, blending=%s\n"
+                        "    sourceCrop={%d, %d, %d, %d}, displayFrame={%d, %d, %d, %d}\n"
+                        "    visibleRegionScreen=<%d rect(s)>, acquireFenceFd=%d, releaseFenceFd=%d\n",
+                i, layer, comp_type_str(layer->compositionType), layer->hints, layer->flags, layer->handle,
+                layer->transform, blending_type_str(layer->blending),
+                layer->sourceCrop.left, layer->sourceCrop.top, layer->sourceCrop.right, layer->sourceCrop.bottom,
+                layer->displayFrame.left, layer->displayFrame.top, layer->displayFrame.right, layer->displayFrame.bottom,
+                layer->visibleRegionScreen.numRects, layer->acquireFenceFd, layer->releaseFenceFd);
+    }
+}
+
+/* For vsync thread synchronization */
+static pthread_mutex_t vsync_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t vsync_cond = PTHREAD_COND_INITIALIZER;
+
+void
+hwcv11_proc_invalidate(const struct hwc_procs* procs)
+{
+}
+
+void
+hwcv11_proc_vsync(const struct hwc_procs* procs, int disp, int64_t timestamp)
+{
+    //fprintf(stderr, "%s: procs=%x, disp=%d, timestamp=%.0f\n", __func__, procs, disp, (float)timestamp);
+    pthread_mutex_lock(&vsync_mutex);
+    pthread_cond_signal(&vsync_cond);
+    pthread_mutex_unlock(&vsync_mutex);
+}
+
+void
+hwcv11_proc_hotplug(const struct hwc_procs* procs, int disp, int connected)
+{
+}
+
+static hwc_procs_t global_procs = {
+    hwcv11_proc_invalidate,
+    hwcv11_proc_vsync,
+    hwcv11_proc_hotplug,
+};
+
 HwComposerBackend_v11::HwComposerBackend_v11(hw_module_t *hwc_module, hw_device_t *hw_device)
     : HwComposerBackend(hwc_module)
     , hwc_device((hwc_composer_device_1_t *)hw_device)
     , hwc_win(NULL)
-    , hwc_list(NULL)
-    , hwc_mList(NULL)
-    , oldretire(-1)
-    , oldrelease(-1)
-    , oldrelease2(-1)
+    , hwc_primaryDisplay(NULL)
+    , hwc_displayList(NULL)
+    , lastDisplayFence(-1)
 {
-    HWC_PLUGIN_EXPECT_ZERO(hwc_device->blank(hwc_device, 0, 0));
+    qDebug() << __PRETTY_FUNCTION__;
+    hwc_device->registerProcs(hwc_device, &global_procs);
+    sleepDisplay(false);
 }
 
 HwComposerBackend_v11::~HwComposerBackend_v11()
@@ -66,12 +151,12 @@ HwComposerBackend_v11::~HwComposerBackend_v11()
     // Close the hwcomposer handle
     HWC_PLUGIN_EXPECT_ZERO(hwc_close_1(hwc_device));
 
-    if (hwc_mList != NULL) {
-        free(hwc_mList);
+    if (hwc_displayList != NULL) {
+        free(hwc_displayList);
     }
 
-    if (hwc_list != NULL) {
-        free(hwc_list);
+    if (hwc_primaryDisplay != NULL) {
+        free(hwc_primaryDisplay);
     }
 }
 
@@ -87,23 +172,32 @@ HwComposerBackend_v11::createWindow(int width, int height)
     // We expect that we haven't created a window already, if we had, we
     // would leak stuff, and we want to avoid that for obvious reasons.
     HWC_PLUGIN_EXPECT_NULL(hwc_win);
-    HWC_PLUGIN_EXPECT_NULL(hwc_list);
-    HWC_PLUGIN_EXPECT_NULL(hwc_mList);
+    HWC_PLUGIN_EXPECT_NULL(hwc_primaryDisplay);
+    HWC_PLUGIN_EXPECT_NULL(hwc_displayList);
 
     hwc_win = new HWComposerNativeWindow(width, height, HAL_PIXEL_FORMAT_RGBA_8888);
 
-    size_t neededsize = sizeof(hwc_display_contents_1_t) + 2 * sizeof(hwc_layer_1_t);
-    hwc_list = (hwc_display_contents_1_t *) malloc(neededsize);
-    hwc_mList = (hwc_display_contents_1_t **) malloc(HWC_NUM_DISPLAY_TYPES * sizeof(hwc_display_contents_1_t *));
-    const hwc_rect_t r = { 0, 0, width, height };
+    int numLayers = 2;
+    size_t neededsize = sizeof(hwc_display_contents_1_t) + (numLayers * sizeof(hwc_layer_1_t));
+    hwc_primaryDisplay = (hwc_display_contents_1_t *) malloc(neededsize);
+    hwc_displayList = (hwc_display_contents_1_t **) malloc((HWC_NUM_DISPLAY_TYPES) * sizeof(hwc_display_contents_1_t *));
 
-    for (int i = 0; i < HWC_NUM_DISPLAY_TYPES; i++) {
-         hwc_mList[i] = hwc_list;
-    }
+    /* for v1.1 we will have at maximum HWC_NUM_DISPLAY_TYPES displays. However we're
+     * using the primary display only but set the second one to NULL as some hwc
+     * implementations seem to dereference the second entry in the display array */
+    hwc_displayList[0] = hwc_primaryDisplay;
+    hwc_displayList[1] = NULL;
 
     hwc_layer_1_t *layer = NULL;
 
-    layer = &hwc_list->hwLayers[0];
+    qDebug() << "width" << width << "height" << height;
+
+    visible_rect.top = 0;
+    visible_rect.left = 0;
+    visible_rect.bottom = height;
+    visible_rect.right = width;
+
+    layer = &hwc_primaryDisplay->hwLayers[0];
     memset(layer, 0, sizeof(hwc_layer_1_t));
     layer->compositionType = HWC_FRAMEBUFFER;
     layer->hints = 0;
@@ -111,14 +205,14 @@ HwComposerBackend_v11::createWindow(int width, int height)
     layer->handle = 0;
     layer->transform = 0;
     layer->blending = HWC_BLENDING_NONE;
-    layer->sourceCrop = r;
-    layer->displayFrame = r;
+    layer->sourceCrop = visible_rect;
+    layer->displayFrame = visible_rect;
     layer->visibleRegionScreen.numRects = 1;
-    layer->visibleRegionScreen.rects = &layer->displayFrame;
+    layer->visibleRegionScreen.rects = &visible_rect;
     layer->acquireFenceFd = -1;
     layer->releaseFenceFd = -1;
 
-    layer = &hwc_list->hwLayers[1];
+    layer = &hwc_primaryDisplay->hwLayers[1];
     memset(layer, 0, sizeof(hwc_layer_1_t));
     layer->compositionType = HWC_FRAMEBUFFER_TARGET;
     layer->hints = 0;
@@ -126,16 +220,21 @@ HwComposerBackend_v11::createWindow(int width, int height)
     layer->handle = 0;
     layer->transform = 0;
     layer->blending = HWC_BLENDING_NONE;
-    layer->sourceCrop = r;
-    layer->displayFrame = r;
+    layer->sourceCrop = visible_rect;
+    layer->displayFrame = visible_rect;
     layer->visibleRegionScreen.numRects = 1;
-    layer->visibleRegionScreen.rects = &layer->displayFrame;
+    layer->visibleRegionScreen.rects = &visible_rect;
     layer->acquireFenceFd = -1;
     layer->releaseFenceFd = -1;
 
-    hwc_list->retireFenceFd = -1;
-    hwc_list->flags = HWC_GEOMETRY_CHANGED;
-    hwc_list->numHwLayers = 2;
+    hwc_primaryDisplay->retireFenceFd = -1;
+    hwc_primaryDisplay->flags = HWC_GEOMETRY_CHANGED;
+    hwc_primaryDisplay->numHwLayers = 2;
+
+    //aosp exynos hwc in particular, checks that these fields are non-null in hwc1.1, although
+    //these fields are deprecated in hwc1.1 and later.
+    hwc_primaryDisplay->dpy = reinterpret_cast<void*>(0xDECAF);
+    hwc_primaryDisplay->sur = reinterpret_cast<void*>(0xC0FFEE);
 
     return (EGLNativeWindowType) static_cast<ANativeWindow *>(hwc_win);
 }
@@ -151,46 +250,85 @@ HwComposerBackend_v11::destroyWindow(EGLNativeWindowType window)
 void
 HwComposerBackend_v11::swap(EGLNativeDisplayType display, EGLSurface surface)
 {
-    // TODO: Wait for vsync?
+    HWC_PLUGIN_ASSERT_NOT_NULL(hwc_win);
+
+    HWComposerNativeWindowBuffer *buffer;
+    int bufferFenceFd;
+
+    hwc_win->lockFrontBuffer(&buffer, &bufferFenceFd);
+    if (!buffer)
+        return;
+
+    hwc_primaryDisplay->hwLayers[1].handle = buffer->handle;
+    hwc_primaryDisplay->hwLayers[1].acquireFenceFd = bufferFenceFd;
+
+    hwc_primaryDisplay->hwLayers[0].handle = NULL;
+    hwc_primaryDisplay->hwLayers[0].flags = HWC_SKIP_LAYER;
+
+    HWC_PLUGIN_ASSERT_ZERO(hwc_device->prepare(hwc_device, HWC_NUM_DISPLAY_TYPES, hwc_displayList));
+
+#if 0
+    hwc_primaryDisplay->dpy = display;
+    hwc_primaryDisplay->sur = surface;
+    hwc_primaryDisplay->hwLayers[1].acquireFenceFd = -1;
+    hwc_primaryDisplay->hwLayers[1].releaseFenceFd = -1;
+
+    qDebug() << "before prepare";
+    dump_display_contents(hwc_primaryDisplay);
+    HWC_PLUGIN_ASSERT_ZERO(hwc_device->prepare(hwc_device, 1, hwc_displayList));
 
     HWC_PLUGIN_ASSERT_NOT_NULL(hwc_win);
 
-    HWComposerNativeWindowBuffer *front;
-    hwc_win->lockFrontBuffer(&front);
+    HWComposerNativeWindowBuffer *buffer;
+    int bufferFenceFd;
 
-    hwc_mList[0]->hwLayers[1].handle = front->handle;
-    hwc_mList[0]->hwLayers[0].handle = NULL;
-    hwc_mList[0]->hwLayers[0].flags = HWC_SKIP_LAYER;
+    qDebug() << "before lockFrontBuffer";
+    dump_display_contents(hwc_primaryDisplay);
+    hwc_win->lockFrontBuffer(&buffer, &bufferFenceFd);
 
-    oldretire = hwc_mList[0]->retireFenceFd;
-    oldrelease = hwc_mList[0]->hwLayers[0].releaseFenceFd;
-    oldrelease2 = hwc_mList[0]->hwLayers[1].releaseFenceFd;
+    hwc_primaryDisplay->hwLayers[0].handle = NULL;
+    hwc_primaryDisplay->hwLayers[0].flags = HWC_SKIP_LAYER;
+    hwc_primaryDisplay->hwLayers[1].compositionType = HWC_FRAMEBUFFER_TARGET;
+    hwc_primaryDisplay->hwLayers[1].handle = buffer->handle;
+    hwc_primaryDisplay->hwLayers[1].acquireFenceFd = ::dup(bufferFenceFd);
 
-    HWC_PLUGIN_ASSERT_ZERO(hwc_device->prepare(hwc_device, HWC_NUM_DISPLAY_TYPES, hwc_mList));
-    HWC_PLUGIN_ASSERT_ZERO(hwc_device->set(hwc_device, HWC_NUM_DISPLAY_TYPES, hwc_mList));
+    qDebug() << "before set";
+    dump_display_contents(hwc_primaryDisplay);
+    HWC_PLUGIN_ASSERT_ZERO(hwc_device->set(hwc_device, 1, hwc_displayList));
 
-    hwc_win->unlockFrontBuffer(front);
+    qDebug() << "before unlockFrontBuffer";
+    dump_display_contents(hwc_primaryDisplay);
 
-    if (oldrelease != -1) {
-        sync_wait(oldrelease, -1);
-        close(oldrelease);
+    // TODO make sure the release fence is copied from the framebuffer layer
+    int releaseFenceFd = hwc_primaryDisplay->hwLayers[1].releaseFenceFd;
+    hwc_win->unlockFrontBuffer(buffer, releaseFenceFd);
+
+    qDebug() << "lastDisplayFence =" << lastDisplayFence;
+
+    if (hwc_primaryDisplay->retireFenceFd != -1) {
+        close(hwc_primaryDisplay->retireFenceFd);
+        hwc_primaryDisplay->retireFenceFd = -1;
     }
 
-    if (oldrelease2 != -1) {
-        sync_wait(oldrelease2, -1);
-        close(oldrelease2);
-    }
-
-    if (oldretire != -1) {
-        sync_wait(oldretire, -1);
-        close(oldretire);
-    }
+    close(bufferFenceFd);
+#endif
 }
 
 void
 HwComposerBackend_v11::sleepDisplay(bool sleep)
 {
-    // TODO
+    if (sleep) {
+        HWC_PLUGIN_EXPECT_ZERO(hwc_device->eventControl(hwc_device, 0, HWC_EVENT_VSYNC, 0));
+        HWC_PLUGIN_EXPECT_ZERO(hwc_device->blank(hwc_device, 0, 1));
+    }
+    else {
+        HWC_PLUGIN_EXPECT_ZERO(hwc_device->blank(hwc_device, 0, 0));
+        HWC_PLUGIN_EXPECT_ZERO(hwc_device->eventControl(hwc_device, 0, HWC_EVENT_VSYNC, 1));
+    }
+
+    if (!sleep && hwc_primaryDisplay != NULL) {
+        hwc_primaryDisplay->flags = HWC_GEOMETRY_CHANGED;
+    }
 }
 
 float

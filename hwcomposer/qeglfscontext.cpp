@@ -52,13 +52,27 @@ QT_BEGIN_NAMESPACE
 QEglFSContext::QEglFSContext(HwComposerContext *hwc, QEglFSPageFlipper *pageFlipper, const QSurfaceFormat &format, QPlatformOpenGLContext *share,
                              EGLDisplay display, EGLenum eglApi)
     : QEGLPlatformContext(hwc->surfaceFormatFor(format), share, display, QEglFSIntegration::chooseConfig(display, hwc->surfaceFormatFor(format)), eglApi),
-	m_pageFlipper(pageFlipper), m_hwc(hwc)
+      m_pageFlipper(pageFlipper), m_hwc(hwc), m_swapIntervalSet(false)
 {
 }
 
 bool QEglFSContext::makeCurrent(QPlatformSurface *surface)
 {
-    return QEGLPlatformContext::makeCurrent(surface);
+    bool success = QEGLPlatformContext::makeCurrent(surface);
+    if (!m_swapIntervalSet) {
+        int swapInterval = 1;
+        QByteArray swapIntervalString = qgetenv("QT_QPA_EGLFS_SWAPINTERVAL");
+        if (!swapIntervalString.isEmpty()) {
+            bool ok;
+            swapInterval = swapIntervalString.toInt(&ok);
+            if (!ok)
+                swapInterval = 1;
+        }
+        eglSwapInterval(eglDisplay(), swapInterval);
+
+        m_swapIntervalSet = true;
+    }
+    return success;
 }
 
 EGLSurface QEglFSContext::eglSurfaceForPlatformSurface(QPlatformSurface *surface)
@@ -71,10 +85,10 @@ EGLSurface QEglFSContext::eglSurfaceForPlatformSurface(QPlatformSurface *surface
 
 void QEglFSContext::swapBuffers(QPlatformSurface *surface)
 {
+    QEGLPlatformContext::swapBuffers(surface);
+
     if (surface->surface()->surfaceClass() == QSurface::Window) {
         m_hwc->swapToWindow(this, surface);
-    } else {
-        QEGLPlatformContext::swapBuffers(surface);
     }
 }
 
