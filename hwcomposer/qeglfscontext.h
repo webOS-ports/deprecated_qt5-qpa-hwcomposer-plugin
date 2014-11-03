@@ -53,7 +53,7 @@ class QEglFSContext : public QEGLPlatformContext
 {
 public:
     QEglFSContext(HwComposerContext *hwc,
-            const QSurfaceFormat &format, QPlatformOpenGLContext *share, EGLDisplay display
+            const QSurfaceFormat &format, EGLConfig *config, QPlatformOpenGLContext *share, EGLDisplay display
 #if QT_VERSION < QT_VERSION_CHECK(5, 3, 0)
             , EGLenum eglApi = EGL_OPENGL_ES_API);
 #else

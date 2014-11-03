@@ -149,7 +149,9 @@ QPlatformBackingStore *QEglFSIntegration::createPlatformBackingStore(QWindow *wi
 
 QPlatformOpenGLContext *QEglFSIntegration::createPlatformOpenGLContext(QOpenGLContext *context) const
 {
-    return new QEglFSContext(mHwc, mHwc->surfaceFormatFor(context->format()), context->shareHandle(), mDisplay);
+    QSurfaceFormat adjustedFormat = mHwc->surfaceFormatFor(context->format());
+    EGLConfig config = chooseConfig(mDisplay, adjustedFormat);
+    return new QEglFSContext(mHwc, adjustedFormat, &config, context->shareHandle(), mDisplay);
 }
 
 QPlatformOffscreenSurface *QEglFSIntegration::createPlatformOffscreenSurface(QOffscreenSurface *surface) const

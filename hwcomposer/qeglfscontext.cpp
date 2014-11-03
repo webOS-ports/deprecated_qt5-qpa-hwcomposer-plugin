@@ -51,6 +51,7 @@ QT_BEGIN_NAMESPACE
 QEglFSContext::QEglFSContext(
                                HwComposerContext *hwc
                              , const QSurfaceFormat &format
+                             , EGLConfig *config
                              , QPlatformOpenGLContext *share
                              , EGLDisplay display
 #if QT_VERSION < QT_VERSION_CHECK(5, 3, 0)
@@ -58,10 +59,10 @@ QEglFSContext::QEglFSContext(
 #endif
                             )
     : QEGLPlatformContext(
-                          hwc->surfaceFormatFor(format)
+                          format
                         , share
                         , display
-                        , QEglFSIntegration::chooseConfig(display, hwc->surfaceFormatFor(format))
+                        , config
 #if QT_VERSION < QT_VERSION_CHECK(5, 3, 0)
                         , eglApi
 #endif
