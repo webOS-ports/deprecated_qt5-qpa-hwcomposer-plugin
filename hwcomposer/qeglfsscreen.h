@@ -52,7 +52,6 @@
 
 QT_BEGIN_NAMESPACE
 
-class QEglFSPageFlipper;
 class QPlatformOpenGLContext;
 
 class QEglFSScreen : public QPlatformScreen //huh: FullScreenScreen ;) just to follow namespace
@@ -72,13 +71,8 @@ public:
 
     qreal refreshRate() const;
 
-#if 0
-    QPlatformScreenPageFlipper *pageFlipper() const;
-#endif
-
 private:
     HwComposerContext *m_hwc;
-    QEglFSPageFlipper *m_pageFlipper;
     EGLDisplay m_dpy;
 };
 
