@@ -178,6 +178,9 @@ QVariant QEglFSIntegration::styleHint(QPlatformIntegration::StyleHint hint) cons
 {
     if (hint == QPlatformIntegration::ShowIsFullScreen)
         return true;
+    else if (hint == QPlatformIntegration::PasswordMaskDelay)
+        // return time in milliseconds - 1 second
+        return QVariant(1000);
 
     return QPlatformIntegration::styleHint(hint);
 }
