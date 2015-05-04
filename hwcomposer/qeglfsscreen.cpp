@@ -44,19 +44,44 @@
 
 #include <private/qmath_p.h>
 
+#include <QtSensors/QSensorManager>
+#include <QtSensors/QOrientationSensor>
+#include <QtSensors/QOrientationFilter>
+#include <QtSensors/QOrientationReading>
+#include <qpa/qwindowsysteminterface.h>
+
+#include <QTimer>
+
+#include "moc_qeglfsscreen.cpp"
+
 QT_BEGIN_NAMESPACE
 
 QEglFSScreen::QEglFSScreen(HwComposerContext *hwc, EGLDisplay dpy)
     : m_hwc(hwc)
     , m_dpy(dpy)
+    , m_screenOrientation(Qt::PrimaryOrientation)
+    , m_orientationSensor(new QOrientationSensor(this))
 {
 #ifdef QEGL_EXTRA_DEBUG
     qWarning("QEglScreen %p\n", this);
 #endif
+
+    connect(m_orientationSensor, SIGNAL(readingChanged()), this, SLOT(orientationReadingChanged()));
+    QTimer::singleShot(0, this, SLOT(onStarted()));
 }
 
 QEglFSScreen::~QEglFSScreen()
 {
+    if(m_orientationSensor) {
+        m_orientationSensor->stop();
+        delete m_orientationSensor; m_orientationSensor = NULL;
+    }
+}
+
+void QEglFSScreen::onStarted()
+{
+    if( !m_orientationSensor->isActive() )
+        m_orientationSensor->start();
 }
 
 QRect QEglFSScreen::geometry() const
@@ -97,6 +122,40 @@ QDpi QEglFSScreen::logicalDpi() const
 qreal QEglFSScreen::refreshRate() const
 {
     return m_hwc->refreshRate();
+}
+
+void QEglFSScreen::orientationReadingChanged()
+{
+    QSize screenSize = m_hwc->screenSize();
+    Qt::ScreenOrientation screenPrimaryOrientation = Qt::PortraitOrientation;
+    if( screenSize.width() > screenSize.height() ) {
+        screenPrimaryOrientation = Qt::LandscapeOrientation;
+    }
+
+    QOrientationReading *orientationReading = m_orientationSensor->reading();
+    QOrientationReading::Orientation currentOrientation = orientationReading->orientation();
+
+    switch(currentOrientation) {
+    case QOrientationReading::TopUp:   /* 0° */
+        m_screenOrientation = screenPrimaryOrientation;
+        break;
+    case QOrientationReading::LeftUp:  /* 90° clockwise */
+        m_screenOrientation = screenPrimaryOrientation == Qt::PortraitOrientation ? Qt::InvertedLandscapeOrientation : Qt::PortraitOrientation;
+        break;
+    case QOrientationReading::TopDown: /* 180° */
+        m_screenOrientation = screenPrimaryOrientation == Qt::PortraitOrientation ? Qt::InvertedPortraitOrientation : Qt::InvertedLandscapeOrientation;
+        break;
+    case QOrientationReading::RightUp: /* 270° clockwise */
+        m_screenOrientation = screenPrimaryOrientation == Qt::PortraitOrientation ? Qt::LandscapeOrientation : Qt::InvertedPortraitOrientation;
+        break;
+    }
+
+    QWindowSystemInterface::handleScreenOrientationChange(QPlatformScreen::screen(), m_screenOrientation);
+}
+
+Qt::ScreenOrientation QEglFSScreen::orientation() const
+{
+    return m_screenOrientation;
 }
 
 QT_END_NAMESPACE

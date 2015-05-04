@@ -49,13 +49,16 @@
 
 #include <EGL/egl.h>
 
+class QOrientationSensor;
 
 QT_BEGIN_NAMESPACE
 
 class QPlatformOpenGLContext;
 
-class QEglFSScreen : public QPlatformScreen //huh: FullScreenScreen ;) just to follow namespace
+class QEglFSScreen : public QObject, public QPlatformScreen //huh: FullScreenScreen ;) just to follow namespace
 {
+    Q_OBJECT
+
 public:
     QEglFSScreen(HwComposerContext *hwc, EGLDisplay display);
     ~QEglFSScreen();
@@ -71,9 +74,17 @@ public:
 
     qreal refreshRate() const;
 
+    Qt::ScreenOrientation orientation() const;
+
 private:
     HwComposerContext *m_hwc;
     EGLDisplay m_dpy;
+    Qt::ScreenOrientation m_screenOrientation;
+    QOrientationSensor *m_orientationSensor;
+
+private Q_SLOTS:
+    void orientationReadingChanged();
+    void onStarted();
 };
 
 QT_END_NAMESPACE
