@@ -50,10 +50,17 @@ class QEglFSIntegrationPlugin : public QPlatformIntegrationPlugin
 #if QT_VERSION < QT_VERSION_CHECK(5, 2, 0)
     Q_PLUGIN_METADATA(IID "org.qt-project.Qt.QPA.QPlatformIntegrationFactoryInterface.5.1" FILE "hwcomposer.json")
 #else
+#if QT_VERSION < QT_VERSION_CHECK(5, 5, 0)
     Q_PLUGIN_METADATA(IID "org.qt-project.Qt.QPA.QPlatformIntegrationFactoryInterface.5.2" FILE "hwcomposer.json")
+#else
+    Q_PLUGIN_METADATA(IID "org.qt-project.Qt.QPA.QPlatformIntegrationFactoryInterface.5.3" FILE "hwcomposer.json")
+#endif
 #endif
 public:
     QPlatformIntegration *create(const QString&, const QStringList&);
+#if QT_VERSION >= QT_VERSION_CHECK(5, 5, 0)
+    QPlatformIntegration *create(const QString&key, const QStringList&params, int &argc, char **argv) { return create(key, params); }
+#endif
 };
 
 QPlatformIntegration* QEglFSIntegrationPlugin::create(const QString& system, const QStringList& paramList)
