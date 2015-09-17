@@ -58,6 +58,9 @@ class QEglFSIntegrationPlugin : public QPlatformIntegrationPlugin
 #endif
 public:
     QPlatformIntegration *create(const QString&, const QStringList&);
+#if QT_VERSION >= QT_VERSION_CHECK(5, 5, 0)
+    QPlatformIntegration *create(const QString&key, const QStringList&params, int &argc, char **argv) { return create(key, params); }
+#endif
 };
 
 QPlatformIntegration* QEglFSIntegrationPlugin::create(const QString& system, const QStringList& paramList)
