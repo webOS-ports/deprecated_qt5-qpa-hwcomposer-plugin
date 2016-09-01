@@ -43,7 +43,9 @@
 #define HWCOMPOSER_BACKEND_H
 
 #include <sys/types.h>
+#include <sync/sync.h>
 
+#include <android-config.h>
 #include <hardware/hardware.h>
 #include <hardware/hwcomposer.h>
 
@@ -52,6 +54,7 @@
 
 #include <qdebug.h>
 
+class QEglFSWindow;
 
 // Evaluate "x", if it doesn't return zero, print a warning
 #define HWC_PLUGIN_EXPECT_ZERO(x) \
@@ -65,7 +68,7 @@
 
 // Evaluate "x", if it is NULL, exit with a fatal error
 #define HWC_PLUGIN_FATAL(x) \
-    qFatal("QPA-HWC: %s", x, __func__)
+    qFatal("QPA-HWC: %s in %s", x, __func__)
 
 // Evaluate "x", if it is NULL, exit with a fatal error
 #define HWC_PLUGIN_ASSERT_NOT_NULL(x) \
@@ -77,6 +80,19 @@
     { int res; if ((res = (x)) != 0) \
         qFatal("QPA-HWC: %s in %s returned %i", (#x), __func__, res); }
 
+static uint32_t interpreted_version(hw_device_t *hwc_device)
+{
+    uint32_t version = hwc_device->version;
+
+    if ((version & 0xffff0000) == 0) {
+        // Assume header version is always 1
+        uint32_t header_version = 1;
+
+        // Legacy version encoding
+        version = (version << 16) | header_version;
+    }
+    return version;
+}
 
 
 class HwComposerBackend {
@@ -92,6 +108,8 @@ public:
     virtual void swap(EGLNativeDisplayType display, EGLSurface surface) = 0;
     virtual void sleepDisplay(bool sleep) = 0;
     virtual float refreshRate() = 0;
+
+    virtual bool requestUpdate(QEglFSWindow *) { return false; }
 
 protected:
     HwComposerBackend(hw_module_t *hwc_module);

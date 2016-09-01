@@ -96,9 +96,6 @@ HwComposerContext::HwComposerContext()
 
 HwComposerContext::~HwComposerContext()
 {
-    // Turn display off
-    sleepDisplay(true);
-
     // Properly clean up hwcomposer backend
     HwComposerBackend::destroy(backend);
 
@@ -191,5 +188,14 @@ qreal HwComposerContext::refreshRate() const
 {
     return fps;
 }
+
+bool HwComposerContext::requestUpdate(QEglFSWindow *window)
+{
+    if (backend)
+        return backend->requestUpdate(window);
+    return false;
+}
+
+
 
 QT_END_NAMESPACE

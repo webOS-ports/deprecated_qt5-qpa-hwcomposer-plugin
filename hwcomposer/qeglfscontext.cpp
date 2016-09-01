@@ -49,16 +49,45 @@
 
 QT_BEGIN_NAMESPACE
 
-QEglFSContext::QEglFSContext(HwComposerContext *hwc, QEglFSPageFlipper *pageFlipper, const QSurfaceFormat &format, QPlatformOpenGLContext *share,
-                             EGLDisplay display, EGLenum eglApi)
-    : QEGLPlatformContext(hwc->surfaceFormatFor(format), share, display, QEglFSIntegration::chooseConfig(display, hwc->surfaceFormatFor(format)), eglApi),
-	m_pageFlipper(pageFlipper), m_hwc(hwc)
+QEglFSContext::QEglFSContext(
+                               HwComposerContext *hwc
+                             , QEglFSPageFlipper *pageFlipper
+                             , const QSurfaceFormat &format
+                             , QPlatformOpenGLContext *share
+                             , EGLDisplay display
+#if QT_VERSION < QT_VERSION_CHECK(5, 3, 0)
+                             , EGLenum eglApi
+#endif
+                            )
+    : QEGLPlatformContext(
+                          hwc->surfaceFormatFor(format)
+                        , share
+                        , display
+                        , QEglFSIntegration::chooseConfig(display, hwc->surfaceFormatFor(format))
+#if QT_VERSION < QT_VERSION_CHECK(5, 3, 0)
+                        , eglApi
+#endif
+      ),
+    m_hwc(hwc), m_pageFlipper(pageFlipper), m_swapIntervalConfigured(false)
 {
 }
 
 bool QEglFSContext::makeCurrent(QPlatformSurface *surface)
 {
-    return QEGLPlatformContext::makeCurrent(surface);
+    bool current = QEGLPlatformContext::makeCurrent(surface);
+    if (current && !m_swapIntervalConfigured) {
+        m_swapIntervalConfigured = true;
+        int swapInterval = 1;
+        QByteArray swapIntervalString = qgetenv("QT_QPA_EGLFS_SWAPINTERVAL");
+        if (!swapIntervalString.isEmpty()) {
+            bool ok;
+            swapInterval = swapIntervalString.toInt(&ok);
+            if (!ok)
+                swapInterval = 1;
+        }
+        eglSwapInterval(eglDisplay(), swapInterval);
+    }
+    return current;
 }
 
 EGLSurface QEglFSContext::eglSurfaceForPlatformSurface(QPlatformSurface *surface)

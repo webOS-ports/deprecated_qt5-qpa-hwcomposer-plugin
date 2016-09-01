@@ -54,14 +54,19 @@ class QEglFSContext : public QEGLPlatformContext
 {
 public:
     QEglFSContext(HwComposerContext *hwc, QEglFSPageFlipper *pageFlipper,
-            const QSurfaceFormat &format, QPlatformOpenGLContext *share, EGLDisplay display,
-            EGLenum eglApi = EGL_OPENGL_ES_API);
+            const QSurfaceFormat &format, QPlatformOpenGLContext *share, EGLDisplay display
+#if QT_VERSION < QT_VERSION_CHECK(5, 3, 0)
+            , EGLenum eglApi = EGL_OPENGL_ES_API);
+#else
+            );
+#endif
     bool makeCurrent(QPlatformSurface *surface);
     EGLSurface eglSurfaceForPlatformSurface(QPlatformSurface *surface);
     void swapBuffers(QPlatformSurface *surface);
 private:
     HwComposerContext *m_hwc;
     QEglFSPageFlipper *m_pageFlipper;
+    bool m_swapIntervalConfigured;
 };
 
 QT_END_NAMESPACE
