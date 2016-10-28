@@ -1,3 +1,9 @@
+NO LONGER USED
+-------
+
+Since we're using the upstream version directly as per https://github.com/webOS-ports/meta-webos-ports/commit/45edf72baafdab1751f661118cf3d8c9905087c0.
+
+
 Qt 5 QPA hwcomposer plugin
 ==========================
 
